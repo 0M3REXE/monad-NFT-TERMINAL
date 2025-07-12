@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Terminal Test Interface</title>
+    <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .container { background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 10px 0; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        input, select { padding: 8px; margin: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        .result { background: #e9ecef; padding: 10px; border-radius: 4px; margin: 10px 0; font-family: monospace; }
+        .error { background: #f8d7da; border: 1px solid #f5c6cb; }
+        .success { background: #d4edda; border: 1px solid #c3e6cb; }
+    </style>
+</head>
+<body>
+    <h1>🎨 NFT Terminal Test Interface</h1>
+    
+    <div class="container">
+        <h3>📋 Connection Status</h3>
+        <div id="status">Connecting to Anvil...</div>
+        <button onclick="connect()">Connect Wallet</button>
+        <div id="accountInfo"></div>
+    </div>
+
+    <div class="container">
+        <h3>🏭 Factory Functions</h3>
+        <button onclick="getFactoryInfo()">Get Factory Info</button>
+        <button onclick="createTestCollection()">Create Test Collection</button>
+        <div id="factoryResult" class="result"></div>
+    </div>
+
+    <div class="container">
+        <h3>🎨 Create Custom Collection</h3>
+        <div>
+            <input type="text" id="collectionName" placeholder="Collection Name" value="My Test NFTs">
+            <input type="text" id="collectionSymbol" placeholder="Symbol" value="TEST">
+        </div>
+        <div>
+            <input type="text" id="baseURI" placeholder="Base URI" value="https://api.example.com/metadata/">
+            <input type="number" id="maxSupply" placeholder="Max Supply" value="100">
+        </div>
+        <div>
+            <input type="number" id="mintPrice" placeholder="Mint Price (ETH)" value="0.01" step="0.001">
+            <button onclick="createCustomCollection()">Create Collection</button>
+        </div>
+        <div id="createResult" class="result"></div>
+    </div>
+
+    <div class="container">
+        <h3>💎 Minting Interface</h3>
+        <div>
+            <label>Collection Address:</label>
+            <input type="text" id="mintAddress" placeholder="0x..." style="width: 400px;">
+            <button onclick="loadCollection()">Load Collection</button>
+        </div>
+        <div id="collectionInfo" class="result"></div>
+        <div>
+            <input type="number" id="mintQuantity" placeholder="Quantity" value="1" min="1" max="10">
+            <button onclick="mintNFT()">Mint NFT</button>
+        </div>
+        <div id="mintResult" class="result"></div>
+    </div>
+
+    <div class="container">
+        <h3>🔍 Check NFT Balance</h3>
+        <button onclick="checkBalance()">Check My NFTs</button>
+        <div id="balanceResult" class="result"></div>
+    </div>
+
+    <script>
+        // Contract addresses from your deployment
+        const CONTRACTS = {
+            FACTORY: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+            VERIFIER: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", 
+            SAMPLE_NFT: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+        };
+
+        // Anvil default account
+        const ANVIL_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+        // Contract ABIs (simplified)
+        const FACTORY_ABI = [
+            "function createCollection(string memory name, string memory symbol, string memory baseTokenURI, uint256 maxSupply, uint256 mintPrice) external payable returns (address)",
+            "function getCollectionCount() external view returns (uint256)",
+            "function collectionCreationFee() external view returns (uint256)",
+            "function getCreatorCollections(address creator) external view returns (address[] memory)",
+            "function getAllCollections() external view returns (address[] memory)"
+        ];
+
+        const TERMINAL_ABI = [
+            "function name() external view returns (string)",
+            "function symbol() external view returns (string)",
+            "function totalSupply() external view returns (uint256)",
+            "function maxSupply() external view returns (uint256)", 
+            "function mintPrice() external view returns (uint256)",
+            "function currentPhase() external view returns (uint8)",
+            "function publicMint(uint256 quantity) external payable",
+            "function balanceOf(address owner) external view returns (uint256)",
+            "function setMintPhase(uint8 phase) external"
+        ];
+
+        let provider, signer, factory, currentCollection;
+
+        async function connect() {
+            try {
+                // Connect to Anvil
+                provider = new ethers.providers.JsonRpcProvider("http://localhost:8545");
+                signer = new ethers.Wallet(ANVIL_PRIVATE_KEY, provider);
+                
+                // Connect to factory
+                factory = new ethers.Contract(CONTRACTS.FACTORY, FACTORY_ABI, signer);
+                
+                // Update UI
+                document.getElementById("status").innerHTML = "✅ Connected to Anvil";
+                document.getElementById("accountInfo").innerHTML = `
+                    <strong>Account:</strong> ${signer.address}<br>
+                    <strong>Network:</strong> Anvil (Chain ID: 31337)
+                `;
+                
+                // Load sample collection by default
+                document.getElementById("mintAddress").value = CONTRACTS.SAMPLE_NFT;
+                
+                log("Connected successfully!");
+                log(`Account: ${signer.address}`);
+                
+            } catch (error) {
+                document.getElementById("status").innerHTML = "❌ Connection failed";
+                log(`Error: ${error.message}`, "error");
+            }
+        }
+
+        async function getFactoryInfo() {
+            try {
+                const collectionCount = await factory.getCollectionCount();
+                const creationFee = await factory.collectionCreationFee();
+                const allCollections = await factory.getAllCollections();
+                
+                const result = `
+                    📊 Factory Statistics:
+                    • Total Collections: ${collectionCount.toString()}
+                    • Creation Fee: ${ethers.utils.formatEther(creationFee)} ETH
+                    • All Collections: ${allCollections.join(', ')}
+                `;
+                
+                document.getElementById("factoryResult").innerHTML = result;
+                log("Factory info loaded");
+                
+            } catch (error) {
+                log(`Error: ${error.message}`, "error");
+            }
+        }
+
+        async function createTestCollection() {
+            try {
+                log("Creating test collection...");
+                
+                const creationFee = await factory.collectionCreationFee();
+                
+                const tx = await factory.createCollection(
+                    "Quick Test Collection",
+                    "QTC",
+                    "https://api.quicktest.com/",
+                    50,
+                    ethers.utils.parseEther("0.005"),
+                    { value: creationFee }
+                );
+                
+                log(`Transaction sent: ${tx.hash}`);
+                const receipt = await tx.wait();
+                log(`✅ Collection created! Block: ${receipt.blockNumber}`);
+                
+                // Get the new collection address (simplified - in production you'd parse events)
+                const allCollections = await factory.getAllCollections();
+                const newCollection = allCollections[allCollections.length - 1];
+                
+                document.getElementById("factoryResult").innerHTML = `
+                    ✅ Test Collection Created!
+                    Address: ${newCollection}
+                    Transaction: ${receipt.transactionHash}
+                `;
+                
+                // Auto-load the new collection
+                document.getElementById("mintAddress").value = newCollection;
+                
+            } catch (error) {
+                log(`Error: ${error.message}`, "error");
+            }
+        }
+
+        async function createCustomCollection() {
+            try {
+                const name = document.getElementById("collectionName").value;
+                const symbol = document.getElementById("collectionSymbol").value;
+                const baseURI = document.getElementById("baseURI").value;
+                const maxSupply = document.getElementById("maxSupply").value;
+                const mintPrice = document.getElementById("mintPrice").value;
+                
+                if (!name || !symbol || !baseURI || !maxSupply || !mintPrice) {
+                    log("Please fill all fields", "error");
+                    return;
+                }
+                
+                log("Creating custom collection...");
+                
+                const creationFee = await factory.collectionCreationFee();
+                
+                const tx = await factory.createCollection(
+                    name,
+                    symbol,
+                    baseURI,
+                    parseInt(maxSupply),
+                    ethers.utils.parseEther(mintPrice),
+                    { value: creationFee }
+                );
+                
+                log(`Transaction sent: ${tx.hash}`);
+                const receipt = await tx.wait();
+                
+                // Get new collection address
+                const allCollections = await factory.getAllCollections();
+                const newCollection = allCollections[allCollections.length - 1];
+                
+                document.getElementById("createResult").innerHTML = `
+                    ✅ Custom Collection Created!
+                    Name: ${name} (${symbol})
+                    Address: ${newCollection}
+                    Max Supply: ${maxSupply}
+                    Mint Price: ${mintPrice} ETH
+                `;
+                
+                // Auto-load the new collection
+                document.getElementById("mintAddress").value = newCollection;
+                
+            } catch (error) {
+                log(`Error: ${error.message}`, "error");
+                document.getElementById("createResult").innerHTML = `❌ Error: ${error.message}`;
+            }
+        }
+
+        async function loadCollection() {
+            try {
+                const address = document.getElementById("mintAddress").value;
+                if (!ethers.utils.isAddress(address)) {
+                    log("Invalid address", "error");
+                    return;
+                }
+                
+                currentCollection = new ethers.Contract(address, TERMINAL_ABI, signer);
+                
+                const name = await currentCollection.name();
+                const symbol = await currentCollection.symbol();
+                const totalSupply = await currentCollection.totalSupply();
+                const maxSupply = await currentCollection.maxSupply();
+                const mintPrice = await currentCollection.mintPrice();
+                const currentPhase = await currentCollection.currentPhase();
+                
+                const phases = ['CLOSED', 'WHITELIST', 'PUBLIC'];
+                
+                document.getElementById("collectionInfo").innerHTML = `
+                    📝 Collection Info:
+                    • Name: ${name} (${symbol})
+                    • Supply: ${totalSupply.toString()} / ${maxSupply.toString()}
+                    • Mint Price: ${ethers.utils.formatEther(mintPrice)} ETH
+                    • Phase: ${phases[currentPhase]} (${currentPhase})
+                    • Address: ${address}
+                `;
+                
+                log(`Collection loaded: ${name}`);
+                
+            } catch (error) {
+                log(`Error loading collection: ${error.message}`, "error");
+            }
+        }
+
+        async function mintNFT() {
+            try {
+                if (!currentCollection) {
+                    log("Please load a collection first", "error");
+                    return;
+                }
+                
+                const quantity = parseInt(document.getElementById("mintQuantity").value);
+                if (quantity < 1 || quantity > 10) {
+                    log("Quantity must be between 1 and 10", "error");
+                    return;
+                }
+                
+                log(`Minting ${quantity} NFT(s)...`);
+                
+                const mintPrice = await currentCollection.mintPrice();
+                const totalCost = mintPrice.mul(quantity);
+                
+                const tx = await currentCollection.publicMint(quantity, {
+                    value: totalCost
+                });
+                
+                log(`Transaction sent: ${tx.hash}`);
+                const receipt = await tx.wait();
+                
+                document.getElementById("mintResult").innerHTML = `
+                    ✅ Successfully Minted!
+                    • Quantity: ${quantity}
+                    • Total Cost: ${ethers.utils.formatEther(totalCost)} ETH
+                    • Transaction: ${receipt.transactionHash}
+                    • Block: ${receipt.blockNumber}
+                `;
+                
+                log(`✅ Minted ${quantity} NFT(s) successfully!`);
+                
+                // Refresh collection info
+                loadCollection();
+                
+            } catch (error) {
+                log(`Mint error: ${error.message}`, "error");
+                document.getElementById("mintResult").innerHTML = `❌ Mint failed: ${error.message}`;
+            }
+        }
+
+        async function checkBalance() {
+            try {
+                if (!currentCollection) {
+                    log("Please load a collection first", "error");
+                    return;
+                }
+                
+                const balance = await currentCollection.balanceOf(signer.address);
+                
+                document.getElementById("balanceResult").innerHTML = `
+                    🏆 Your NFT Balance: ${balance.toString()} NFTs
+                    Collection: ${await currentCollection.name()}
+                    Your Address: ${signer.address}
+                `;
+                
+                log(`You own ${balance.toString()} NFTs from this collection`);
+                
+            } catch (error) {
+                log(`Error checking balance: ${error.message}`, "error");
+            }
+        }
+
+        function log(message, type = "info") {
+            console.log(message);
+            const timestamp = new Date().toLocaleTimeString();
+            const logElement = document.createElement("div");
+            logElement.innerHTML = `[${timestamp}] ${message}`;
+            
+            if (type === "error") {
+                logElement.style.color = "red";
+            } else if (type === "success") {
+                logElement.style.color = "green";
+            }
+        }
+
+        // Auto-connect on page load
+        window.onload = connect;
+    </script>
+</body>
+</html>
